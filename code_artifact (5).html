@@ -1,0 +1,588 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>大溪教會 - 福音行動守望地圖</title>
+    <!-- Tailwind CSS for styling -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Leaflet CSS for Map -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800&family=Noto+Sans+TC:wght@400;500;700&display=swap');
+        body { font-family: 'Noto Sans TC', 'Inter', sans-serif; overflow: hidden; }
+        #map { height: 100vh; width: 100vw; z-index: 1; }
+        .glass-panel {
+            background: rgba(255, 255, 255, 0.9);
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            box-shadow: 0 8px 32px 0 rgba(31, 38, 135, 0.15);
+        }
+        .custom-div-icon {
+            background: transparent;
+            border: none;
+            font-size: 24px;
+            text-align: center;
+            line-height: 24px;
+            drop-shadow: 2px 4px 6px rgba(0,0,0,0.3);
+        }
+        /* Hide scrollbar for clean UI */
+        ::-webkit-scrollbar { width: 0px; background: transparent; }
+
+        /* 列印專用樣式 */
+        @media screen {
+            #print-area { display: none; }
+        }
+        @media print {
+            body { overflow: auto; background: white; }
+            body > *:not(#print-area) { display: none !important; }
+            #print-area { display: block !important; width: 100%; color: black; }
+            .print-card { 
+                page-break-after: always; /* 每組印在獨立的一頁（或半頁） */
+                padding: 40px; 
+                border: 2px solid #ddd; 
+                border-radius: 10px;
+                margin-bottom: 20px;
+                font-family: 'Noto Sans TC', sans-serif;
+            }
+            .print-title { font-size: 28px; font-weight: bold; border-bottom: 4px solid; padding-bottom: 10px; margin-bottom: 20px; }
+            .print-section { margin-bottom: 20px; }
+            .print-label { font-weight: bold; color: #555; font-size: 18px; }
+            .print-text { font-size: 22px; margin-top: 5px; }
+            .print-route { background: #f9f9f9; padding: 15px; border-radius: 8px; font-size: 20px; line-height: 1.6; }
+        }
+    </style>
+</head>
+<body class="bg-gray-100 h-screen w-screen flex flex-col relative text-gray-800">
+
+    <div id="loading-screen" class="absolute inset-0 z-50 flex flex-col items-center justify-center bg-blue-600 text-white transition-opacity duration-500">
+        <svg class="animate-spin -ml-1 mr-3 h-10 w-10 text-white mb-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+            <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+        </svg>
+        <h1 class="text-2xl font-bold">連線至雲端系統...</h1>
+        <p class="mt-2 text-blue-200">準備福音守望地圖</p>
+    </div>
+
+    <div id="role-selection" class="absolute inset-0 z-40 bg-gray-100 overflow-y-auto hidden">
+        <div class="max-w-md mx-auto pt-12 px-6 pb-20">
+            <div class="text-center mb-8">
+                <div class="text-5xl mb-4">🕊️</div>
+                <h1 class="text-3xl font-bold text-gray-900 mb-2">大溪教會福音行動</h1>
+                <p class="text-gray-500">請選擇您的任務角色以進入系統</p>
+            </div>
+
+            <!-- 列印按鈕 -->
+            <button onclick="printTaskCards()" class="w-full mb-6 bg-white shadow-sm rounded-xl p-4 flex items-center justify-center gap-2 text-gray-700 font-bold transform transition active:scale-95 hover:bg-gray-50 border border-gray-200">
+                <span>🖨️</span> 列印各組任務卡 (組長用)
+            </button>
+
+            <button onclick="selectRole('watcher')" class="w-full mb-6 glass-panel rounded-2xl p-6 flex flex-col items-center justify-center transform transition active:scale-95 hover:bg-blue-50 border-blue-200 border-2">
+                <div class="text-4xl mb-2">⛪</div>
+                <h2 class="text-xl font-bold text-blue-800">教會守望者</h2>
+                <p class="text-sm text-gray-500 mt-1">在大螢幕觀看進度並代禱</p>
+            </button>
+
+            <div class="space-y-3 relative">
+                <div class="absolute inset-0 flex items-center" aria-hidden="true">
+                    <div class="w-full border-t border-gray-300"></div>
+                </div>
+                <div class="relative flex justify-center">
+                    <span class="px-2 bg-gray-100 text-sm text-gray-500">或選擇組長身分打卡</span>
+                </div>
+            </div>
+
+            <div class="grid grid-cols-2 gap-3 mt-4" id="group-buttons">
+                <!-- Group buttons injected via JS -->
+            </div>
+        </div>
+    </div>
+
+    <div id="map-container" class="absolute inset-0 z-10 hidden">
+        <div id="map"></div>
+        
+        <!-- Header Overlay -->
+        <div class="absolute top-0 left-0 w-full z-[1000] p-4 pointer-events-none">
+            <div class="glass-panel rounded-xl p-3 flex justify-between items-center shadow-lg pointer-events-auto">
+                <div class="flex items-center gap-2">
+                    <span class="text-2xl" id="role-icon">⛪</span>
+                    <div>
+                        <h2 class="font-bold text-sm md:text-base leading-tight" id="role-title">守望總覽地圖</h2>
+                        <div class="text-xs text-gray-500 flex items-center gap-1">
+                            <span class="w-2 h-2 rounded-full bg-green-500 animate-pulse"></span> 即時同步中
+                        </div>
+                    </div>
+                </div>
+                <button onclick="resetApp()" class="bg-gray-200 hover:bg-gray-300 text-gray-700 text-xs px-3 py-1.5 rounded-lg font-semibold transition">更換角色</button>
+            </div>
+        </div>
+
+        <div id="watcher-panel" class="absolute bottom-6 left-4 right-4 md:left-auto md:right-6 md:w-80 z-[1000] hidden">
+            <div class="glass-panel rounded-2xl p-4 shadow-2xl">
+                <h3 class="font-bold text-gray-800 mb-3 text-sm flex justify-between">
+                    <span>各組進度追蹤</span>
+                    <span class="text-blue-600 text-xs bg-blue-100 px-2 py-0.5 rounded-full" id="active-count">0 組行進中</span>
+                </h3>
+                <div id="status-list" class="space-y-2">
+                    <!-- Status items injected via JS -->
+                </div>
+            </div>
+        </div>
+
+        <div id="leader-panel" class="absolute bottom-6 left-4 right-4 md:left-1/2 md:-translate-x-1/2 md:w-96 z-[1000] hidden">
+            <div class="glass-panel rounded-2xl p-5 shadow-2xl text-center">
+                <div class="mb-4">
+                    <h3 class="font-bold text-lg text-gray-800" id="leader-status-text">就定位後，請打卡出發</h3>
+                    <p class="text-xs text-gray-500 mt-1" id="leader-coords">尚未取得座標</p>
+                </div>
+                
+                <div class="grid grid-cols-2 gap-3 mb-3">
+                    <button id="btn-start" onclick="startTracking()" class="col-span-2 bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 rounded-xl shadow-lg shadow-blue-200 transition transform active:scale-95 flex items-center justify-center gap-2">
+                        <span>📍</span> 開始真實打卡
+                    </button>
+                    <button id="btn-simulate" onclick="simulateTracking()" class="col-span-2 bg-purple-100 hover:bg-purple-200 text-purple-700 font-bold py-3 rounded-xl transition transform active:scale-95 border border-purple-200 flex items-center justify-center gap-2">
+                        <span>🚀</span> 模擬前進 (測試用)
+                    </button>
+                    <button id="btn-arrive" onclick="arriveChurch()" class="col-span-2 bg-green-500 hover:bg-green-600 text-white font-bold py-3 rounded-xl shadow-lg hidden transition transform active:scale-95">
+                        ⛪ 我們抵達教會了！
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div id="custom-modal" class="fixed inset-0 z-[2000] flex items-center justify-center bg-black bg-opacity-50 hidden transition-opacity">
+        <div class="bg-white rounded-2xl p-6 max-w-sm w-full mx-4 shadow-2xl transform transition-all scale-95">
+            <h3 class="text-lg font-bold text-gray-900 mb-2" id="modal-title">訊息</h3>
+            <p class="text-gray-600 mb-6" id="modal-desc">內容</p>
+            <button onclick="closeModal()" class="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded-xl transition">確定</button>
+        </div>
+    </div>
+
+    <!-- 列印區域 (平常隱藏) -->
+    <div id="print-area"></div>
+
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { getAuth, signInAnonymously, signInWithCustomToken } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getFirestore, doc, setDoc, onSnapshot, collection } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+
+        // Global State
+        let app, db, auth, userId;
+        let currentRole = null; 
+        let map, churchMarker;
+        let groupMarkers = {};
+        let groupPolylines = {};
+        let myWatchId = null;
+        let simulationInterval = null;
+        
+        // Constants & Configuration (加入詳細路線文字)
+        const CHURCH_COORDS = [24.8837, 121.2918]; 
+        const GROUPS = [
+            { id: 'group_1', name: '第一組 (西北線)', desc: '大溪橋頭/老街', color: '#3B82F6', emoji: '🏃‍♂️', start: [24.8860, 121.2860], routeText: '大溪橋頭停車場或中正公園入口 ➔ 經中正路或和平老街 ➔ 右轉慈湖路 ➔ 左轉民權東路 ➔ 進入185巷抵達大溪教會。' },
+            { id: 'group_2', name: '第二組 (正西線)', desc: '武嶺橋東/慈湖路', color: '#10B981', emoji: '🏃‍♀️', start: [24.8850, 121.2820], routeText: '武嶺橋東端路口下車 ➔ 沿著慈湖路一路直行 ➔ 左轉民權東路 ➔ 進入185巷抵達大溪教會。' },
+            { id: 'group_3', name: '第三組 (西南線)', desc: '康莊路全聯', color: '#F59E0B', emoji: '🚶‍♂️', start: [24.8790, 121.2870], routeText: '康莊路全聯福利中心周邊下車 ➔ 從康莊路往市區方向走 ➔ 右轉中華路 ➔ 右轉民權東路 ➔ 進入185巷抵達大溪教會。' },
+            { id: 'group_4', name: '第四組 (正東線)', desc: '大溪國中/復興路', color: '#8B5CF6', emoji: '🚶‍♀️', start: [24.8810, 121.2950], routeText: '大溪國中正門或台塑加油站下車 ➔ 沿復興路往市區方向 ➔ 左轉民權東路 ➔ 進入185巷抵達大溪教會。' },
+            { id: 'group_5', name: '第五組 (東北線)', desc: '信義中華路口', color: '#EC4899', emoji: '🏃', start: [24.8870, 121.2940], routeText: '信義路與中華路交叉口超商下車 ➔ 沿中華路往南直行 ➔ 左轉民權東路 ➔ 進入185巷抵達大溪教會。' }
+        ];
+
+        const appId = typeof __app_id !== 'undefined' ? __app_id : 'daxi-church-tracker-default';
+        const COLLECTION_NAME = 'locations';
+
+        window.showModal = (title, desc) => {
+            document.getElementById('modal-title').textContent = title;
+            document.getElementById('modal-desc').textContent = desc;
+            const modal = document.getElementById('custom-modal');
+            modal.classList.remove('hidden');
+            setTimeout(() => modal.querySelector('div').classList.remove('scale-95'), 10);
+        };
+        window.closeModal = () => {
+            const modal = document.getElementById('custom-modal');
+            modal.querySelector('div').classList.add('scale-95');
+            setTimeout(() => modal.classList.add('hidden'), 200);
+        };
+
+        async function init() {
+            renderGroupButtons();
+            generatePrintCards(); // 預先生成列印畫面
+            
+            try {
+                const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : { projectId: "demo-project" };
+                app = initializeApp(firebaseConfig);
+                auth = getAuth(app);
+                db = getFirestore(app);
+
+                if (typeof __initial_auth_token !== 'undefined') {
+                    await signInWithCustomToken(auth, __initial_auth_token);
+                } else {
+                    await signInAnonymously(auth);
+                }
+                
+                if (!auth.currentUser) throw new Error("認證失敗");
+                userId = auth.currentUser.uid;
+                
+                document.getElementById('loading-screen').style.opacity = '0';
+                setTimeout(() => {
+                    document.getElementById('loading-screen').classList.add('hidden');
+                    document.getElementById('role-selection').classList.remove('hidden');
+                }, 500);
+
+            } catch (error) {
+                console.error("Firebase init error:", error);
+                document.getElementById('loading-screen').innerHTML = `<div class="text-white text-center"><p class="text-2xl mb-2">⚠️</p><p>系統連線錯誤</p><p class="text-sm mt-2 text-blue-200">請確認網路狀態後重整畫面</p></div>`;
+            }
+        }
+
+        function renderGroupButtons() {
+            const container = document.getElementById('group-buttons');
+            GROUPS.forEach(g => {
+                const btn = document.createElement('button');
+                btn.className = `glass-panel rounded-xl p-4 flex flex-col items-center transform transition active:scale-95 hover:bg-gray-50`;
+                btn.style.borderTop = `4px solid ${g.color}`;
+                btn.innerHTML = `
+                    <div class="text-2xl mb-1">${g.emoji}</div>
+                    <div class="font-bold text-sm text-gray-800">${g.name}</div>
+                    <div class="text-[10px] text-gray-500">${g.desc}</div>
+                `;
+                btn.onclick = () => selectRole(g.id);
+                container.appendChild(btn);
+            });
+        }
+
+        // 產生列印內容
+        window.generatePrintCards = () => {
+            const printArea = document.getElementById('print-area');
+            let html = '';
+            GROUPS.forEach(g => {
+                html += `
+                <div class="print-card" style="border-color: ${g.color}">
+                    <div class="print-title" style="color: ${g.color}">
+                        ${g.emoji} ${g.name} - 福音行動任務卡
+                    </div>
+                    
+                    <div class="print-section">
+                        <div class="print-label">📍 下車起點：</div>
+                        <div class="print-text">${g.desc}</div>
+                    </div>
+                    
+                    <div class="print-section">
+                        <div class="print-label">⛪ 終點集合：</div>
+                        <div class="print-text">真耶穌教會大溪教會 (民權東路185巷31號)</div>
+                    </div>
+                    
+                    <div class="print-section">
+                        <div class="print-label">🗺️ 專屬路線規劃：</div>
+                        <div class="print-route">${g.routeText}</div>
+                    </div>
+
+                    <div class="print-section" style="margin-top: 40px; border-top: 1px dashed #ccc; padding-top: 20px;">
+                        <div class="print-label">📱 系統打卡步驟：</div>
+                        <ol style="font-size: 18px; line-height: 1.8; padding-left: 20px; margin-top: 10px;">
+                            <li>使用手機瀏覽器開啟群組中的網址。</li>
+                            <li>點選您的身分 <strong>「${g.name}」</strong>。</li>
+                            <li>在下車起點就定位後，點擊藍色按鈕 <strong>「開始真實打卡」</strong>。</li>
+                            <li>一路上發傳單漫步走回教會，時間約控制在 1 小時內。</li>
+                            <li>抵達教會後，點擊綠色按鈕 <strong>「我們抵達教會了」</strong>，完成任務！</li>
+                        </ol>
+                    </div>
+                </div>
+                `;
+            });
+            printArea.innerHTML = html;
+        };
+
+        window.printTaskCards = () => {
+            window.print();
+        };
+
+        window.selectRole = async (role) => {
+            currentRole = role;
+            document.getElementById('role-selection').classList.add('hidden');
+            document.getElementById('map-container').classList.remove('hidden');
+            
+            initMap();
+
+            // 確保地圖正確載入（解決灰白、破圖問題）
+            setTimeout(() => { 
+                map.invalidateSize(); 
+            }, 300);
+            
+            if (role === 'watcher') {
+                document.getElementById('role-title').textContent = "教會守望者地圖";
+                document.getElementById('role-icon').textContent = "⛪";
+                document.getElementById('watcher-panel').classList.remove('hidden');
+                renderWatcherPanel();
+                startListening();
+                
+                // 自動縮放以顯示全地圖（教會與所有起點）
+                const allPoints = [CHURCH_COORDS, ...GROUPS.map(g => g.start)];
+                const bounds = L.latLngBounds(allPoints);
+                setTimeout(() => {
+                    map.fitBounds(bounds, { padding: [50, 50] });
+                }, 400);
+
+            } else {
+                const groupInfo = GROUPS.find(g => g.id === role);
+                document.getElementById('role-title').textContent = `${groupInfo.name} - 行走軌跡`;
+                document.getElementById('role-icon').textContent = groupInfo.emoji;
+                document.getElementById('leader-panel').classList.remove('hidden');
+                
+                await updateGroupStatus(role, 'waiting', groupInfo.start, []);
+                
+                map.setView(groupInfo.start, 16);
+                startListeningSingle(role);
+            }
+        };
+
+        window.resetApp = () => {
+            if(myWatchId) navigator.geolocation.clearWatch(myWatchId);
+            if(simulationInterval) clearInterval(simulationInterval);
+            
+            document.getElementById('map-container').classList.add('hidden');
+            document.getElementById('watcher-panel').classList.add('hidden');
+            document.getElementById('leader-panel').classList.add('hidden');
+            document.getElementById('role-selection').classList.remove('hidden');
+            
+            document.getElementById('btn-start').classList.remove('hidden');
+            document.getElementById('btn-simulate').classList.remove('hidden');
+            document.getElementById('btn-arrive').classList.add('hidden');
+            document.getElementById('leader-status-text').textContent = "就定位後，請打卡出發";
+            
+            if(map) { map.remove(); map = null; }
+            currentRole = null;
+        };
+
+        function initMap() {
+            map = L.map('map', { zoomControl: false });
+            L.control.zoom({ position: 'topright' }).addTo(map);
+
+            L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', {
+                attribution: '&copy; OpenStreetMap contributors',
+                maxZoom: 19
+            }).addTo(map);
+
+            const churchIcon = L.divIcon({
+                className: 'custom-div-icon',
+                html: '⛪',
+                iconSize: [30, 30],
+                iconAnchor: [15, 15]
+            });
+            churchMarker = L.marker(CHURCH_COORDS, { icon: churchIcon }).addTo(map)
+                .bindPopup('<b>真耶穌教會大溪教會</b><br>大家在這裡為你們守望禱告！');
+        }
+
+        const getColRef = () => collection(db, 'artifacts', appId, 'public', 'data', COLLECTION_NAME);
+
+        async function updateGroupStatus(groupId, status, coords, pathArr = null) {
+            if(!auth.currentUser) return;
+            try {
+                const docRef = doc(db, 'artifacts', appId, 'public', 'data', COLLECTION_NAME, groupId);
+                const data = { status: status, lat: coords[0], lng: coords[1], lastUpdate: new Date().getTime() };
+                if(pathArr) data.path = pathArr; 
+                await setDoc(docRef, data, { merge: true });
+            } catch (err) {
+                console.error("更新狀態失敗:", err);
+            }
+        }
+
+        let unsubscribe = null;
+        function startListening() {
+            if(!auth.currentUser) return;
+            if(unsubscribe) unsubscribe();
+            
+            const q = getColRef();
+            unsubscribe = onSnapshot(q, (snapshot) => {
+                let activeCount = 0;
+                snapshot.docChanges().forEach((change) => {
+                    const data = change.doc.data();
+                    const groupId = change.doc.id;
+                    updateMapElement(groupId, data);
+                    updateWatcherUI(groupId, data);
+                });
+                
+                snapshot.forEach(doc => {
+                    if(doc.data().status === 'active') activeCount++;
+                });
+                document.getElementById('active-count').textContent = `${activeCount} 組行進中`;
+            }, (error) => console.error("即時同步錯誤:", error));
+        }
+
+        function startListeningSingle(groupId) {
+            if(!auth.currentUser) return;
+            if(unsubscribe) unsubscribe();
+            
+            const docRef = doc(db, 'artifacts', appId, 'public', 'data', COLLECTION_NAME, groupId);
+            unsubscribe = onSnapshot(docRef, (docSnap) => {
+                if (docSnap.exists()) updateMapElement(groupId, docSnap.data());
+            }, (error) => console.error(error));
+        }
+
+        function updateMapElement(groupId, data) {
+            const gInfo = GROUPS.find(g => g.id === groupId);
+            if(!gInfo) return;
+
+            const latlng = [data.lat, data.lng];
+
+            if (groupMarkers[groupId]) {
+                groupMarkers[groupId].setLatLng(latlng);
+            } else {
+                const icon = L.divIcon({
+                    className: 'custom-div-icon',
+                    html: `<div style="position:relative;">
+                            <div style="font-size:24px;">${gInfo.emoji}</div>
+                            <div style="position:absolute; top:-5px; right:-5px; width:12px; height:12px; border-radius:50%; border:2px solid white; background-color:${gInfo.color};"></div>
+                           </div>`,
+                    iconSize: [30, 30],
+                    iconAnchor: [15, 15]
+                });
+                groupMarkers[groupId] = L.marker(latlng, { icon }).addTo(map).bindPopup(`<b>${gInfo.name}</b><br>${gInfo.desc}`);
+            }
+
+            if (data.path && data.path.length > 0) {
+                if (groupPolylines[groupId]) {
+                    groupPolylines[groupId].setLatLngs(data.path);
+                } else {
+                    groupPolylines[groupId] = L.polyline(data.path, { 
+                        color: gInfo.color, weight: 5, opacity: 0.7, dashArray: '10, 10', lineCap: 'round'
+                    }).addTo(map);
+                }
+            }
+        }
+
+        function renderWatcherPanel() {
+            const list = document.getElementById('status-list');
+            list.innerHTML = '';
+            GROUPS.forEach(g => {
+                list.innerHTML += `
+                    <div id="status-${g.id}" class="flex items-center justify-between p-2 rounded-lg bg-gray-50 border border-gray-100">
+                        <div class="flex items-center gap-3">
+                            <div class="w-3 h-3 rounded-full bg-gray-300" id="indicator-${g.id}"></div>
+                            <div>
+                                <div class="font-bold text-sm text-gray-800">${g.name} ${g.emoji}</div>
+                                <div class="text-[10px] text-gray-500">${g.desc}</div>
+                            </div>
+                        </div>
+                        <div class="text-xs font-semibold text-gray-500" id="text-${g.id}">未出發</div>
+                    </div>
+                `;
+            });
+        }
+
+        function updateWatcherUI(groupId, data) {
+            const indicator = document.getElementById(`indicator-${groupId}`);
+            const text = document.getElementById(`text-${groupId}`);
+            const box = document.getElementById(`status-${groupId}`);
+            if(!indicator || !text) return;
+
+            const gInfo = GROUPS.find(g => g.id === groupId);
+
+            if (data.status === 'active') {
+                indicator.style.backgroundColor = gInfo.color;
+                indicator.classList.add('animate-pulse');
+                text.textContent = '行進發放中';
+                text.style.color = gInfo.color;
+                box.classList.add('border-blue-200', 'bg-blue-50/50');
+            } else if (data.status === 'completed') {
+                indicator.style.backgroundColor = '#10B981';
+                indicator.classList.remove('animate-pulse');
+                text.textContent = '✅ 已抵達教會';
+                text.style.color = '#10B981';
+                box.classList.remove('border-blue-200', 'bg-blue-50/50');
+                box.classList.add('bg-green-50');
+            }
+        }
+
+        let myCurrentPath = [];
+
+        window.startTracking = () => {
+            if(!navigator.geolocation) {
+                showModal('錯誤', '您的瀏覽器不支援定位功能。請嘗試使用模擬前進。');
+                return;
+            }
+            
+            document.getElementById('btn-start').classList.add('hidden');
+            document.getElementById('btn-simulate').classList.add('hidden');
+            document.getElementById('btn-arrive').classList.remove('hidden');
+            document.getElementById('leader-status-text').textContent = "📍 行進記錄中...";
+            
+            myWatchId = navigator.geolocation.watchPosition(
+                (pos) => { handleNewPosition(pos.coords.latitude, pos.coords.longitude); },
+                (err) => {
+                    console.error(err);
+                    showModal('定位錯誤', '無法取得您的真實位置，可能是權限未開。請點擊「模擬前進」來測試。');
+                    resetLeaderButtons();
+                },
+                { enableHighAccuracy: true, maximumAge: 10000, timeout: 5000 }
+            );
+        };
+
+        window.simulateTracking = () => {
+            const gInfo = GROUPS.find(g => g.id === currentRole);
+            if(!gInfo) return;
+
+            document.getElementById('btn-start').classList.add('hidden');
+            document.getElementById('btn-simulate').classList.add('hidden');
+            document.getElementById('btn-arrive').classList.remove('hidden');
+            document.getElementById('leader-status-text').textContent = "🚀 模擬前進中...";
+
+            let currentLat = gInfo.start[0];
+            let currentLng = gInfo.start[1];
+            
+            const steps = 30;
+            const latStep = (CHURCH_COORDS[0] - currentLat) / steps;
+            const lngStep = (CHURCH_COORDS[1] - currentLng) / steps;
+            
+            myCurrentPath = [[currentLat, currentLng]]; 
+            handleNewPosition(currentLat, currentLng, true);
+
+            let stepCount = 0;
+            simulationInterval = setInterval(() => {
+                stepCount++;
+                if(stepCount >= steps) {
+                    clearInterval(simulationInterval);
+                    arriveChurch();
+                    return;
+                }
+                const jitter = () => (Math.random() - 0.5) * 0.0005;
+                currentLat += latStep + jitter();
+                currentLng += lngStep + jitter();
+                
+                handleNewPosition(currentLat, currentLng, true);
+            }, 2000); 
+        };
+
+        function handleNewPosition(lat, lng, isSimulated = false) {
+            document.getElementById('leader-coords').textContent = `精準座標: ${lat.toFixed(5)}, ${lng.toFixed(5)}`;
+            myCurrentPath.push([lat, lng]);
+            map.panTo([lat, lng]);
+            updateGroupStatus(currentRole, 'active', [lat, lng], myCurrentPath);
+        }
+
+        window.arriveChurch = () => {
+            if(myWatchId) navigator.geolocation.clearWatch(myWatchId);
+            if(simulationInterval) clearInterval(simulationInterval);
+            
+            document.getElementById('btn-arrive').classList.add('hidden');
+            document.getElementById('leader-status-text').textContent = "🎉 感謝神！任務完成";
+            document.getElementById('leader-status-text').classList.add('text-green-600');
+            document.getElementById('leader-coords').textContent = "已抵達 真耶穌教會大溪教會";
+            
+            myCurrentPath.push(CHURCH_COORDS);
+            updateGroupStatus(currentRole, 'completed', CHURCH_COORDS, myCurrentPath);
+            map.setView(CHURCH_COORDS, 17);
+            
+            showModal('平安抵達', '辛苦了！報福音傳喜信的人，他們的腳蹤何等佳美！');
+        };
+
+        function resetLeaderButtons() {
+            document.getElementById('btn-start').classList.remove('hidden');
+            document.getElementById('btn-simulate').classList.remove('hidden');
+            document.getElementById('btn-arrive').classList.add('hidden');
+            document.getElementById('leader-status-text').textContent = "就定位後，請打卡出發";
+        }
+
+        window.onload = init;
+    </script>
+</body>
+</html>
