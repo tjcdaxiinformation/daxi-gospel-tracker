@@ -208,16 +208,23 @@
             generatePrintCards(); // 預先生成列印畫面
             
             try {
-                const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : { projectId: "demo-project" };
+                // 替換為您的專屬 Firebase 金鑰
+                const firebaseConfig = {
+                    apiKey: "AIzaSyAdbzVbSdiymAkWm2hLT5ewNkJCG4RflTc",
+                    authDomain: "daxi-gospel.firebaseapp.com",
+                    projectId: "daxi-gospel",
+                    storageBucket: "daxi-gospel.firebasestorage.app",
+                    messagingSenderId: "281024495122",
+                    appId: "1:281024495122:web:68526f01b5db76c13562cb",
+                    measurementId: "G-RHQMJ78X9N"
+                };
+                
                 app = initializeApp(firebaseConfig);
                 auth = getAuth(app);
                 db = getFirestore(app);
 
-                if (typeof __initial_auth_token !== 'undefined') {
-                    await signInWithCustomToken(auth, __initial_auth_token);
-                } else {
-                    await signInAnonymously(auth);
-                }
+                // 登入方式修改為一律使用匿名登入
+                await signInAnonymously(auth);
                 
                 if (!auth.currentUser) throw new Error("認證失敗");
                 userId = auth.currentUser.uid;
