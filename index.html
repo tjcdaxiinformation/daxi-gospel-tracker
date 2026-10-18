@@ -518,10 +518,11 @@
                 (pos) => { handleNewPosition(pos.coords.latitude, pos.coords.longitude); },
                 (err) => {
                     console.error(err);
-                    showModal('定位錯誤', '無法取得您的真實位置，可能是權限未開。請點擊「模擬前進」來測試。');
+                    showModal('定位錯誤', '無法取得您的真實位置，可能是權限未開或無GPS訊號。請到戶外並確認手機定位已開啟。');
                     resetLeaderButtons();
                 },
-                { enableHighAccuracy: true, maximumAge: 10000, timeout: 5000 }
+                // 將 timeout 從 5000 改為 30000 (給手機30秒的時間抓衛星)，並縮短 maximumAge 強制抓最新位置
+                { enableHighAccuracy: true, maximumAge: 0, timeout: 30000 }
             );
         };
 
